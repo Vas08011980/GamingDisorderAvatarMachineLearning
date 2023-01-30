@@ -1,0 +1,530 @@
+Import Library
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+library("tidyverse")
+library("tidymodels")
+library("broom")
+library("knitr")
+library("readr")
+library("here")
+library("haven")
+library("psych")
+library("officer")
+library("ggplot2")
+library("dplyr")
+library("broom.mixed") # for converting bayesian models to tidy tibbles
+library("dotwhisker")  # for visualizing regression results
+library("rstanarm")
+library("agua")
+library("h2o")
+
+# Helper packages
+library("nycflights13")    # for flight data
+library("skimr") 
+```
+
+
+Imprort Data
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=FALSE)
+data<-read_sav("C:/Users/vasil/Desktop/R Machine Learning/data.sav")
+data1<-data[c("Q37", "Q38", "Q39", "Q40", "Q42", "Q43", "Q44", "Q45", "Q46", "Q47", "Q48", "Q49", "Q50", "Q112", "Q113", "Q114", "Q115", "Q116", "Q117", "Q118", "Q119", "Q120", "Q121", "Q122", "Q123", "Q126", "Q127", "Q128", "Q129", "Q130", "Q131")]
+DataN<-data1%>%setNames(c("GDT1", "GDT2", "GDT3", "GDT4", "IGD1", "IGD2", "IGD3", "IGD4", "IGD5", "IGD6", "IGD7", "IGD8", "IGD9", "ID1", "ID2", "ID3", "ID4", "IM1", "IM2", "IM3", "IM4", "IM5", "COMP1", "COMP2", "COMP3", "PE1", "PE2", "PE3", "PE4", "PE5", "PE6"))
+DataM<-DataN%>%mutate(GDTTotal=GDT1+GDT2+GDT3+GDT4)%>%mutate(IGDTTotal=IGD1+IGD2+IGD3+IGD4+IGD5+IGD6+IGD7+IGD8+IGD9)%>%mutate(IDTotal=ID1+ID2+ID3+ID4)%>%mutate(IMTotal=IM1+IM2+IM3+IM4+IM5)%>%mutate(COMPTotal=COMP1+COMP2+COMP3)%>%mutate(PETotal=PE1+PE2+PE3+PE4+PE5+PE6)
+DATAAIGD<-DataM[c("GDTTotal", "IDTotal", "IMTotal", "COMPTotal", "PETotal")]
+DATAAIIGD<-DataM[c("IGDTTotal", "IDTotal", "IMTotal", "COMPTotal", "PETotal")]
+GDTD<-na.omit(DATAAIGD)
+IGDD<-na.omit(DATAAIIGD)
+```
+
+
+Divide Data in Training and Testing and Crossvalidation Data
+
+
+```{r}
+echo=FALSE
+warning=FALSE
+error=FALSE
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+prior_dist <- rstanarm::student_t(df = 1)
+set.seed(123)
+data_split <- initial_split(GDTD, prop = 3/4)
+
+# Create data frames for the two sets:
+train_data_GD <- training(data_split)
+test_data_GD  <- testing(data_split)
+
+#Crossvalidation split
+set.seed(123)
+folds <- vfold_cv(train_data_GD, v = 10)
+```
+
+
+Create Recipe
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+set.seed(123)
+GD_rec <- 
+  recipe(GDTTotal ~ ., data = train_data_GD)%>%step_dummy(all_nominal_predictors())%>%step_zv(all_predictors())%>% step_normalize(all_numeric_predictors())%>%prep()
+
+train_data_GD_b<-bake(GD_rec, new_data = train_data_GD)
+test_data_GD_b<-bake(GD_rec, new_data = test_data_GD)
+
+```
+
+
+Introduce Models
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+set.seed(123)
+#Linear Regression
+lm_spec <- 
+  # Type
+  linear_reg() %>% 
+  # Engine
+  set_engine("lm") %>% 
+  # Mode
+  set_mode("regression")
+#LASSO_LM
+lasso_spec <-
+  # Type
+  linear_reg(penalty = 1, mixture = 1) %>% 
+  # Engine
+  set_engine('glmnet') %>% 
+  # Mode
+  set_mode('regression')
+#Decision_Tree
+tree_spec <- decision_tree() %>% 
+  set_engine('rpart') %>% 
+  set_mode('regression')
+#Random_Forest
+rf_spec <- rand_forest() %>% 
+  set_engine('randomForest') %>% 
+  set_mode('regression')
+#Ridge_Regression
+RIDGE_spec <-
+  # Type
+  linear_reg(penalty = 1, mixture = 0) %>% 
+  # Engine
+  set_engine('glmnet') %>% 
+  # Mode
+  set_mode('regression')
+#Xboost_model
+boost_spec <- boost_tree() %>% 
+  set_engine('xgboost') %>% 
+  set_mode('regression')
+
+
+
+```
+
+
+Mixing recipes and models to create workflows
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+set.seed(123)
+#LM
+lm_workflow <- workflow() %>% 
+  add_recipe(GD_rec) %>% 
+  add_model(lm_spec)
+#LASSO
+LASSO_workflow <- workflow() %>% 
+  add_recipe(GD_rec) %>% 
+  add_model(lasso_spec)
+#Decision_Tree
+Tree_workflow <- workflow() %>% 
+  add_recipe(GD_rec) %>% 
+  add_model(tree_spec)
+#Random_Forest
+Random_Forest_workflow <- workflow() %>% 
+  add_recipe(GD_rec) %>% 
+  add_model(rf_spec)
+#RIDGE_SPEC
+Ridge_workflow <- workflow() %>% 
+  add_recipe(GD_rec) %>% 
+  add_model(RIDGE_spec)
+#Xboost_model
+boost_workflow <- workflow() %>% 
+  add_recipe(GD_rec) %>% 
+  add_model(boost_spec)
+```
+
+
+Fitting Workflows in Training Data
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+set.seed(123)
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+#LM
+lm_fit<-lm_workflow%>%fit(train_data_GD_b)
+lm_fit
+glance(lm_fit)
+
+  
+#LASSO
+Lasso_fit<-LASSO_workflow%>%fit(train_data_GD_b)
+glance(Lasso_fit) 
+Lasso_fit
+  
+#Decision_Tree
+Tree_fit<-Tree_workflow%>%fit(train_data_GD_b)
+Tree_fit
+#Random_Forest
+RF_fit<-Random_Forest_workflow%>%fit(train_data_GD_b)
+  summary(RF_fit)
+  RF_fit
+#RIDGE_SPEC
+Ridge_fit<-Ridge_workflow%>%fit(train_data_GD_b)
+ summary(Ridge_fit) 
+glance(Ridge_fit)
+#Xboost_model
+Boost_fit<-boost_workflow%>%fit(train_data_GD_b) 
+  Boost_fit
+
+```
+
+
+Predict LM results on the testing data. Tuning is not required.
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+set.seed(123)
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+results_LM <-  test_data_GD_b%>% 
+  bind_cols( lm_fit%>% 
+    # Predict GDTotal
+    predict(new_data = test_data_GD_b) %>% 
+      rename(predictions = .pred))
+results_LM
+
+# Compare predictions
+results_LM %>%
+  select(c(GDTTotal, predictions)) %>% 
+  slice_head(n = 10)
+#visualize predictions
+results_LM %>% 
+  ggplot(mapping = aes(x = GDTTotal, y = predictions)) +
+  geom_point(size = 1.6, color = "steelblue") +
+  # Overlay a regression line
+  geom_smooth(method = "lm", se = F, color = 'magenta') +
+  ggtitle("Gaming Disorder Self-Reported Score Predictions") +
+  xlab("Actual Labels") +
+  ylab("Predicted Labels") +
+  theme(plot.title = element_text(hjust = 1))
+```
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+set.seed(123)
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+# Multiple regression metrics
+eval_metrics <- metric_set(rmse, rsq)
+
+# Evaluate RMSE, R2 based on the results
+eval_metrics(data = results_LM,
+             truth = GDTTotal,
+             estimate = predictions) %>% 
+  select(-2)
+```
+
+
+Evaluate the LASSO model
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+set.seed(123)
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+results_LASSO <-  test_data_GD_b%>% 
+  bind_cols( Lasso_fit%>% 
+    # Predict GDTotal
+    predict(new_data = test_data_GD_b) %>% 
+      rename(predictions = .pred))
+results_LASSO
+
+# Compare predictions
+results_LASSO %>%
+  select(c(GDTTotal, predictions)) %>% 
+  slice_head(n = 10)
+#visualize predictions
+results_LASSO %>% 
+  ggplot(mapping = aes(x = GDTTotal, y = predictions)) +
+  geom_point(size = 1.6, color = "steelblue") +
+  # Overlay a regression line
+  geom_smooth(method = "lm", se = F, color = 'magenta') +
+  ggtitle("Gaming Disorder Self-Reported Score LASSO Predictions") +
+  xlab("Actual Labels") +
+  ylab("Predicted Labels") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+Evaluate the fit of the LASSO model
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+set.seed(123)
+# Multiple regression metrics
+eval_metrics <- metric_set(rmse, rsq)
+
+# Evaluate RMSE, R2 based on the results
+eval_metrics(data = results_LASSO,
+             truth = GDTTotal,
+             estimate = predictions) %>% 
+  select(-2)
+```
+
+
+Evaluate the Fit of the Decision Tree
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+set.seed(123)
+# Make predictions for test data
+results_Tree <-  test_data_GD_b%>% 
+  bind_cols( Tree_fit%>% predict(new_data = test_data_GD_b) %>% 
+              rename(predictions = .pred))
+
+# Evaluate the model
+tree_metrics <- eval_metrics(data = results_Tree,
+                                  truth = GDTTotal,
+                                  estimate = predictions) %>% 
+  select(-2)
+tree_metrics
+
+# Plot predicted vs actual
+tree_plt <- results_Tree %>% 
+  ggplot(mapping = aes(x = GDTTotal, y = predictions)) +
+  geom_point(color = 'tomato') +
+  # overlay regression line
+  geom_smooth(method = 'lm', color = 'steelblue', se = F) +
+  ggtitle("Gaming Disorder Self Reported Scores Decision Predictions") +
+  xlab("Actual Labels") +
+  ylab("Predicted Labels") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Return evaluations
+list(tree_metrics, tree_plt)
+```
+
+
+Evaluate Random Forests Prediction Performance
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+set.seed(123)
+# Make predictions for test data
+results_RF <-  test_data_GD_b%>% 
+  bind_cols( RF_fit%>% predict(new_data = test_data_GD_b) %>% 
+              rename(predictions = .pred))
+
+# Evaluate the model
+RF_metrics <- eval_metrics(data = results_RF,
+                                  truth = GDTTotal,
+                                  estimate = predictions) %>% 
+  select(-2)
+RF_metrics
+
+# Plot predicted vs actual
+RF_plt <- results_RF %>% 
+  ggplot(mapping = aes(x = GDTTotal, y = predictions)) +
+  geom_point(color = 'tomato') +
+  # overlay regression line
+  geom_smooth(method = 'lm', color = 'steelblue', se = F) +
+  ggtitle("Gaming Disorder Self Reported Scores Random Forests Predictions") +
+  xlab("Actual Labels") +
+  ylab("Predicted Labels") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Return evaluations
+list(RF_metrics, RF_plt)
+RF_metrics
+```
+
+
+Evaluate Ridge
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+set.seed(123)
+# Make predictions for test data
+results_Ridge <-  test_data_GD_b%>% 
+  bind_cols(Ridge_fit%>% predict(new_data = test_data_GD_b) %>% 
+              rename(predictions = .pred))
+
+# Evaluate the model
+Ridge_metrics <- eval_metrics(data = results_Ridge,
+                                  truth = GDTTotal,
+                                  estimate = predictions) %>% 
+  select(-2)
+Ridge_metrics
+
+# Plot predicted vs actual
+Ridge_plt <- results_Ridge %>% 
+  ggplot(mapping = aes(x = GDTTotal, y = predictions)) +
+  geom_point(color = 'tomato') +
+  # overlay regression line
+  geom_smooth(method = 'lm', color = 'steelblue', se = F) +
+  ggtitle("Gaming Disorder Self Reported Scores Ridge Predictions") +
+  xlab("Actual Labels") +
+  ylab("Predicted Labels") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Return evaluations
+list(Ridge_metrics, Ridge_plt)
+Ridge_metrics
+```
+
+
+Evaluate Boost
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+set.seed(123)
+# Make predictions for test data
+results_Boost <-  test_data_GD_b%>% 
+  bind_cols(Boost_fit%>% predict(new_data = test_data_GD_b) %>% 
+              rename(predictions = .pred))
+
+# Evaluate the model
+Boost_metrics <- eval_metrics(data = results_Boost,
+                                  truth = GDTTotal,
+                                  estimate = predictions) %>% 
+  select(-2)
+Boost_metrics
+
+# Plot predicted vs actual
+Boost_plt <- results_Boost %>% 
+  ggplot(mapping = aes(x = GDTTotal, y = predictions)) +
+  geom_point(color = 'tomato') +
+  # overlay regression line
+  geom_smooth(method = 'lm', color = 'steelblue', se = F) +
+  ggtitle("Gaming Disorder Self Reported Scores XBoost Predictions") +
+  xlab("Actual Labels") +
+  ylab("Predicted Labels") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+# Return evaluations
+list(Boost_metrics, Boost_plt)
+Boost_metrics
+```
+
+
+Tuning the Lasso Model, which had the optimum fit in our previous assessment
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+set.seed(123)
+#Introducing the tuning grid
+my_grid <- tibble(penalty = 10^seq(-2, -1, length.out = 10))
+#Preparing a tuning lasso model and workflow
+Lasso_tune <- linear_reg(mode = "regression",
+                        penalty = tune(),
+                        mixture = 1) %>% 
+  set_engine("glmnet")
+doParallel::registerDoParallel()
+
+Lasso_tune_wf <- workflow() %>%
+  add_model(Lasso_tune) %>%
+  add_recipe(GD_rec)
+
+#Run the crossvalidation with the folds I had created for the tuning 
+Lasso_tune_res <- Lasso_tune_wf %>% 
+  tune_grid(resamples = folds,
+            grid = my_grid,
+            control = control_grid(verbose = FALSE, save_pred = TRUE),
+            metrics = metric_set(rmse, rsq))
+best_Lasso <- Lasso_tune_res %>% 
+  select_best('rmse', 'rsq')
+best_Lasso
+```
+
+
+Finally we run the best tuned Lasso model
+
+
+```{r}
+echo=FALSE
+error=FALSE
+warning=FALSE
+options(scipen = 999, digits=3, max.print=999999, show.signif.stars=TRUE)
+set.seed(123)
+#Finalizing Workflow
+Lasso_final_wf <- Lasso_tune_wf %>% 
+  finalize_workflow(best_Lasso)
+#Fitting the finalized workflow
+Lasso_final_fit_TrTeData <- Lasso_final_wf %>% 
+  last_fit(data_split )
+
+
+# Collect metrics
+Lasso_final_fit_TrTeData %>% 
+  collect_metrics()
+
+
+#Extract the tuned LAsso
+Lasso_Tuned_model <- Lasso_final_fit_TrTeData$.workflow[[1]]
+#Save the Tuned Lasso Algorithm
+#saveRDS(Lasso_Tuned_model, here::here("models", "Lasso_Tuned_model.rds"))
+#beepr::beep(0)
+```
+
